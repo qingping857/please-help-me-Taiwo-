@@ -1,119 +1,138 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 
 interface RecorderState {
   isRecording: boolean
   isPaused: boolean
   duration: number
-  audioUrl: string | null
+  error: string | null
 }
 
-export function useRecorder(onDataAvailable?: (blob: Blob) => void) {
+export function useRecorder(onDataAvailable: (blob: Blob) => void) {
   const [state, setState] = useState<RecorderState>({
     isRecording: false,
     isPaused: false,
     duration: 0,
-    audioUrl: null,
+    error: null
   })
 
   const mediaRecorder = useRef<MediaRecorder | null>(null)
-  const audioChunks = useRef<Blob[]>([])
-  const timerRef = useRef<NodeJS.Timeout>()
+  const mediaStream = useRef<MediaStream | null>(null)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const chunks = useRef<Blob[]>([])
+
+  // 停止录音
+  const stopRecording = useCallback(() => {
+    if (mediaRecorder.current && state.isRecording) {
+      mediaRecorder.current.stop()
+    }
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (mediaStream.current) {
+      mediaStream.current.getTracks().forEach(track => track.stop())
+      mediaStream.current = null
+    }
+
+    setState(prev => ({
+      ...prev,
+      isRecording: false,
+      isPaused: false
+    }))
+  }, [state.isRecording])
 
   // 开始录音
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaRecorder.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      })
-      audioChunks.current = []
+      chunks.current = []
+      setState(prev => ({
+        ...prev,
+        isRecording: true,
+        isPaused: false,
+        error: null,
+        duration: 0
+      }))
 
-      // 每秒获取一次音频数据
-      mediaRecorder.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data)
-          // 如果提供了回调函数，则调用它
-          onDataAvailable?.(event.data)
+      mediaStream.current = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      })
+
+      mediaRecorder.current = new MediaRecorder(mediaStream.current)
+
+      mediaRecorder.current.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.current.push(e.data)
+          onDataAvailable(e.data)
         }
       }
 
       mediaRecorder.current.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' })
-        const audioUrl = URL.createObjectURL(audioBlob)
-        setState(prev => ({ ...prev, audioUrl }))
+        const blob = new Blob(chunks.current, { type: 'audio/webm' })
+        onDataAvailable(blob)
+        chunks.current = []
       }
 
-      mediaRecorder.current.start(1000) // 每秒触发一次 ondataavailable
-      setState(prev => ({ ...prev, isRecording: true, isPaused: false }))
+      mediaRecorder.current.start(1000)
 
-      // 开始计时
       timerRef.current = setInterval(() => {
         setState(prev => ({ ...prev, duration: prev.duration + 1 }))
       }, 1000)
+
     } catch (error) {
-      console.error('Error accessing microphone:', error)
+      console.error('启动录音失败:', error)
+      setState(prev => ({
+        ...prev,
+        isRecording: false,
+        error: error instanceof Error ? error.message : '启动录音失败'
+      }))
+      stopRecording()
     }
-  }, [onDataAvailable])
+  }, [onDataAvailable, stopRecording])
 
   // 暂停录音
   const pauseRecording = useCallback(() => {
-    if (mediaRecorder.current?.state === 'recording') {
+    if (mediaRecorder.current && state.isRecording && !state.isPaused) {
       mediaRecorder.current.pause()
-      clearInterval(timerRef.current)
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
       setState(prev => ({ ...prev, isPaused: true }))
     }
-  }, [])
+  }, [state.isRecording, state.isPaused])
 
   // 恢复录音
   const resumeRecording = useCallback(() => {
-    if (mediaRecorder.current?.state === 'paused') {
+    if (mediaRecorder.current && state.isRecording && state.isPaused) {
       mediaRecorder.current.resume()
       timerRef.current = setInterval(() => {
         setState(prev => ({ ...prev, duration: prev.duration + 1 }))
       }, 1000)
       setState(prev => ({ ...prev, isPaused: false }))
     }
-  }, [])
-
-  // 停止录音
-  const stopRecording = useCallback(() => {
-    if (mediaRecorder.current) {
-      mediaRecorder.current.stop()
-      mediaRecorder.current.stream.getTracks().forEach(track => track.stop())
-      clearInterval(timerRef.current)
-      setState(prev => ({ ...prev, isRecording: false, isPaused: false }))
-    }
-  }, [])
-
-  // 重置录音
-  const resetRecording = useCallback(() => {
-    if (state.audioUrl) {
-      URL.revokeObjectURL(state.audioUrl)
-    }
-    setState({
-      isRecording: false,
-      isPaused: false,
-      duration: 0,
-      audioUrl: null,
-    })
-    audioChunks.current = []
-  }, [state.audioUrl])
+  }, [state.isRecording, state.isPaused])
 
   // 获取录音数据
-  const getAudioBlob = useCallback(async () => {
-    if (audioChunks.current.length === 0) return null
-    return new Blob(audioChunks.current, { type: 'audio/webm' })
+  const getAudioBlob = useCallback(async (): Promise<Blob | null> => {
+    if (chunks.current.length === 0) return null
+    return new Blob(chunks.current, { type: 'audio/webm' })
   }, [])
 
   return {
     ...state,
     startRecording,
+    stopRecording,
     pauseRecording,
     resumeRecording,
-    stopRecording,
-    resetRecording,
-    getAudioBlob,
+    getAudioBlob
   }
 } 

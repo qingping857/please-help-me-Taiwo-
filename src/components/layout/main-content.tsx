@@ -2,52 +2,33 @@
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Mic, MicOff, Pause, Play, StopCircle } from "lucide-react"
+import { Mic, StopCircle } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useState, useRef, useEffect, useCallback } from "react"
-import { useRecorder } from "@/hooks/use-recorder"
-import { LanguageSelect, languages } from "@/components/ui/language-select"
-import { transcribeAudio } from "@/lib/openai"
-import type { LanguageCode } from "@/components/ui/language-select"
+import { useState, useRef, useEffect } from "react"
+import { useAliyunRecorder } from "@/hooks/use-aliyun-recorder"
 
 interface Message {
   id: string
   text: string
   isRecording?: boolean
-  audioUrl?: string
-  language?: LanguageCode
 }
 
 export function MainContent() {
   const [messages, setMessages] = useState<Message[]>([])
-  const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>(languages[0].code)
   const currentMessageRef = useRef<string | null>(null)
-
-  const handleDataAvailable = useCallback(async (blob: Blob) => {
-    if (!currentMessageRef.current) return
-
-    try {
-      console.log('收到新的音频数据，大小:', Math.round(blob.size / 1024), 'KB')
-      const result = await transcribeAudio(blob, {
-        language: selectedLanguage
-      })
-
-      setMessages(messages => messages.map(msg =>
-        msg.id === currentMessageRef.current
-          ? { ...msg, text: msg.text + result.text }
-          : msg
-      ))
-    } catch (error) {
-      console.error('实时转录失败:', error)
-    }
-  }, [selectedLanguage])
-
-  const recorder = useRecorder(handleDataAvailable)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const handleLanguageChange = useCallback((value: LanguageCode) => {
-    setSelectedLanguage(value)
-  }, [])
+  const handleTranscript = (text: string) => {
+    if (currentMessageRef.current) {
+      setMessages(messages => messages.map(msg =>
+        msg.id === currentMessageRef.current
+          ? { ...msg, text }
+          : msg
+      ))
+    }
+  }
+
+  const recorder = useAliyunRecorder(handleTranscript)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -57,13 +38,12 @@ export function MainContent() {
     scrollToBottom()
   }, [messages])
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
   const handleStartRecording = async () => {
+    if (!recorder.isInitialized) {
+      console.error('配置未初始化')
+      return
+    }
+
     try {
       console.log('开始录音...')
       const messageId = Date.now().toString()
@@ -74,8 +54,7 @@ export function MainContent() {
         { 
           id: messageId, 
           text: "", 
-          isRecording: true,
-          language: selectedLanguage
+          isRecording: true
         }
       ])
       
@@ -87,20 +66,16 @@ export function MainContent() {
     }
   }
 
-  const handleStopRecording = async () => {
+  const handleStopRecording = () => {
     try {
       console.log('停止录音...')
       recorder.stopRecording()
       console.log('录音已停止')
 
-      const audioBlob = await recorder.getAudioBlob()
-      if (audioBlob && currentMessageRef.current) {
-        console.log('获取到完整音频数据')
-        const audioUrl = URL.createObjectURL(audioBlob)
-        
+      if (currentMessageRef.current) {
         setMessages(messages => messages.map(msg =>
           msg.id === currentMessageRef.current
-            ? { ...msg, isRecording: false, audioUrl }
+            ? { ...msg, isRecording: false }
             : msg
         ))
       }
@@ -150,7 +125,7 @@ export function MainContent() {
                           className="w-4 h-4 bg-red-500 rounded-full"
                         />
                         <span className="ml-3 text-sm text-gray-500">
-                          录音中... {formatDuration(recorder.duration)}
+                          正在录音... {recorder.duration}秒
                         </span>
                       </div>
                     ) : (
@@ -159,26 +134,7 @@ export function MainContent() {
                           <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white">
                             <Mic className="w-4 h-4" />
                           </div>
-                          <div className="flex-1 space-y-1">
-                            <p className="text-sm font-medium text-gray-500">您的语音</p>
-                            <div className="inline-flex items-center space-x-2">
-                              <span className="text-xs text-gray-400">
-                                {languages.find(lang => lang.code === message.language)?.name}
-                              </span>
-                              {message.audioUrl && (
-                                <audio src={message.audioUrl} controls className="h-8" />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-start space-x-4">
-                          <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
-                            </svg>
-                          </div>
                           <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-500">转录文本</p>
                             <div className="mt-1 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
                               <p className="text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
                                 {message.text || "正在转录..."}
@@ -201,55 +157,32 @@ export function MainContent() {
       <div className="border-t bg-white dark:bg-gray-800">
         <div className="max-w-3xl mx-auto p-4">
           <div className="space-y-4">
-            <div className="flex justify-center">
-              <LanguageSelect
-                value={selectedLanguage}
-                onValueChange={handleLanguageChange}
-              />
-            </div>
+            {recorder.error && (
+              <div className="text-sm text-red-500 text-center">
+                {recorder.error}
+              </div>
+            )}
             <div className="flex gap-2">
               {!recorder.isRecording ? (
                 <Button
                   size="lg"
                   className="w-full bg-purple-600 hover:bg-purple-700"
                   onClick={handleStartRecording}
+                  disabled={!recorder.isInitialized}
                 >
                   <Mic className="mr-2 h-5 w-5" />
-                  开始录音
+                  {recorder.isInitialized ? '开始录音' : '正在初始化...'}
                 </Button>
               ) : (
-                <>
-                  {!recorder.isPaused ? (
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      onClick={recorder.pauseRecording}
-                      className="flex-1"
-                    >
-                      <Pause className="mr-2 h-5 w-5" />
-                      暂停
-                    </Button>
-                  ) : (
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      onClick={recorder.resumeRecording}
-                      className="flex-1"
-                    >
-                      <Play className="mr-2 h-5 w-5" />
-                      继续
-                    </Button>
-                  )}
-                  <Button
-                    size="lg"
-                    variant="destructive"
-                    className="flex-1"
-                    onClick={handleStopRecording}
-                  >
-                    <StopCircle className="mr-2 h-5 w-5" />
-                    停止录音
-                  </Button>
-                </>
+                <Button
+                  size="lg"
+                  variant="destructive"
+                  className="w-full"
+                  onClick={handleStopRecording}
+                >
+                  <StopCircle className="mr-2 h-5 w-5" />
+                  停止录音
+                </Button>
               )}
             </div>
           </div>
