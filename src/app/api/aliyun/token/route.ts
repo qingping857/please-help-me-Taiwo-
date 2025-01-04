@@ -21,6 +21,16 @@ function extractTokenFromXml(xml: string): string {
     throw new Error(errorMessage)
   }
 
+  // 检查是否有错误消息
+  if (cleanXml.includes('<ErrMsg>')) {
+    const errMsgMatch = cleanXml.match(/<ErrMsg>([^<]*)<\/ErrMsg>/)
+    const errMsg = errMsgMatch?.[1]
+    if (errMsg) {
+      console.error('发现错误消息:', errMsg)
+      throw new Error(`阿里云错误: ${errMsg}`)
+    }
+  }
+
   // 检查是否是 Token 响应
   if (!cleanXml.includes('<CreateTokenResponse>')) {
     console.log('响应不是预期的 CreateTokenResponse 格式')
@@ -45,12 +55,12 @@ async function createToken(accessKeyId: string, accessKeySecret: string): Promis
   const apiUrl = 'https://nls-meta.cn-shanghai.aliyuncs.com/pop/2018-05-18/tokens'
   
   const date = new Date().toUTCString()
-  const requestBody = '{}'
+  const requestBody = ''  // 使用空字符串作为请求体
   const contentMD5 = crypto
     .createHash('md5')
     .update(requestBody)
     .digest('base64')
-  const accept = 'application/xml'
+  const accept = 'application/json'  // 修改为 application/json
   const contentType = 'application/json'
   
   // 按照阿里云要求的格式构建签名字符串
@@ -78,7 +88,8 @@ async function createToken(accessKeyId: string, accessKeySecret: string): Promis
     'Content-MD5': contentMD5,
     'Date': date,
     'Authorization': `Dataplus ${accessKeyId}:${signature}`,
-    'Host': 'nls-meta.cn-shanghai.aliyuncs.com'
+    'Host': 'nls-meta.cn-shanghai.aliyuncs.com',
+    'Content-Length': '0'  // 设置为 0，因为请求体为空
   }
 
   try {

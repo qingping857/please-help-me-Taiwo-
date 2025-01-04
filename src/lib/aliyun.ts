@@ -17,11 +17,10 @@ export class AliyunASR {
     private onMessage: (text: string) => void,
     private onError: (error: any) => void
   ) {
-    // 在构造函数中获取配置
     this.config = getConfig().aliyun
   }
 
-  // 生成唯一ID
+  // 生成唯一ID (32位hex字符)
   private generateUUID(): string {
     return Array.from({ length: 32 }, () => 
       Math.floor(Math.random() * 16).toString(16)
@@ -39,52 +38,28 @@ export class AliyunASR {
         }
       })
 
-      const responseText = await response.text()
-      console.log('Token API 响应:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
-        body: responseText
-      })
-
       if (!response.ok) {
-        let errorMessage = `Token 请求失败: ${response.status} ${response.statusText}`
-        try {
-          const errorData = JSON.parse(responseText)
-          if (errorData.error) {
-            errorMessage += `\n${errorData.error}`
-          }
-        } catch (e) {
-          errorMessage += `\n${responseText}`
-        }
-        throw new Error(errorMessage)
+        throw new Error(`Token 请求失败: ${response.status} ${response.statusText}`)
       }
 
-      let data
-      try {
-        data = JSON.parse(responseText)
-      } catch (e) {
-        throw new Error(`响应不是有效的 JSON: ${responseText}`)
-      }
-
-      if (!data.token) {
-        throw new Error(`响应格式错误: ${JSON.stringify(data)}`)
+      const data = await response.json()
+      if (!data.token || !data.wsUrl) {
+        throw new Error('Token 响应格式错误')
       }
 
       console.log('Token 获取成功')
       return data.token
     } catch (error) {
       console.error('获取 Token 失败:', error)
-      throw error instanceof Error ? error : new Error(String(error))
+      throw error
     }
   }
 
   // 获取 WebSocket URL
   private async getWebSocketUrl(): Promise<string> {
     const token = await this.getToken()
-    const url = new URL('wss://nls-gateway.cn-shanghai.aliyuncs.com/ws/v1')
+    const url = new URL('wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1')
     url.searchParams.append('token', token)
-    url.searchParams.append('appkey', this.config.appKey)
     return url.toString()
   }
 
@@ -161,17 +136,31 @@ export class AliyunASR {
           const message = JSON.parse(event.data)
           console.log('收到消息:', message)
 
-          if (message.header.name === 'TranscriptionResultChanged') {
-            // 实时识别结果
-            this.onMessage(message.payload.result)
-          } else if (message.header.name === 'TranscriptionCompleted') {
-            // 识别完成
-            this.onMessage(message.payload.result || '')
-            this.taskId = null
-          } else if (message.header.name === 'TaskFailed') {
-            // 识别失败
-            console.error('识别失败:', message.header.status_text)
-            this.onError(new Error(message.header.status_text))
+          // 处理不同类型的消息
+          switch (message.header.name) {
+            case 'TranscriptionResultChanged':
+              // 实时识别结果
+              if (message.header.status === 20000000) {
+                this.onMessage(message.payload.result)
+              }
+              break
+            case 'SentenceEnd':
+              // 一句话结束
+              if (message.header.status === 20000000) {
+                this.onMessage(message.payload.result)
+              }
+              break
+            case 'TranscriptionCompleted':
+              // 识别完成
+              if (message.header.status === 20000000) {
+                this.taskId = null
+              }
+              break
+            case 'TaskFailed':
+              // 识别失败
+              console.error('识别失败:', message.header.status_text)
+              this.onError(new Error(message.header.status_text))
+              break
           }
         } catch (error) {
           console.error('处理消息失败:', error)
@@ -198,22 +187,21 @@ export class AliyunASR {
 
   // 发送音频数据
   async sendAudioData(data: Blob) {
-    if (!this.ws) {
-      throw new Error('WebSocket 未初始化')
-    }
-
-    if (!this.isConnected) {
-      throw new Error('WebSocket 未连接')
-    }
-
-    if (!this.taskId) {
-      throw new Error('识别任务未启动')
+    if (!this.ws || !this.isConnected || !this.taskId) {
+      throw new Error('WebSocket 未就绪')
     }
 
     try {
       // 将 Blob 转换为二进制数据
       const buffer = await data.arrayBuffer()
-      this.ws.send(buffer)
+      // 每次发送不超过 3200 字节
+      const chunkSize = 3200
+      const view = new Uint8Array(buffer)
+      
+      for (let offset = 0; offset < view.length; offset += chunkSize) {
+        const chunk = view.slice(offset, offset + chunkSize)
+        this.ws.send(chunk)
+      }
     } catch (error) {
       console.error('发送音频数据失败:', error)
       throw error
