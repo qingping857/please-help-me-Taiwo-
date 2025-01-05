@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { nanoid } from 'nanoid'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChatList } from '@/components/chat/chat-list'
 import { ChatInput } from '@/components/chat/chat-input'
-import { startRecording, transcribeAudio } from '@/lib/whisper'
-import { addHistory, updateHistory } from '@/lib/history'
+import { getHistories, updateHistory } from '@/lib/history'
+import { transcribeAudio } from '@/lib/whisper'
+import { nanoid } from 'nanoid'
 
 interface Message {
   id: string
@@ -15,37 +16,21 @@ interface Message {
   isTranscribing?: boolean
 }
 
-export default function Home() {
+export default function ChatPage({ params }: { params: { id: string } }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const currentMessageId = useRef<string | null>(null)
-  const chatId = useRef<string>(nanoid())
+  const router = useRouter()
 
-  // 当消息更新时，更新历史记录
+  // 加载历史记录
   useEffect(() => {
-    if (messages.length > 0) {
-      updateHistory(chatId.current, {
-        id: chatId.current,
-        title: messages[0].content || '新对话',
-        date: new Date().toLocaleString(),
-        messages
-      })
+    const histories = getHistories()
+    const history = histories.find(h => h.id === params.id)
+    if (!history) {
+      router.push('/')
+      return
     }
-  }, [messages])
-
-  // 创建新对话
-  useEffect(() => {
-    if (messages.length === 0) {
-      const newChatId = nanoid()
-      chatId.current = newChatId
-      addHistory({
-        id: newChatId,
-        title: '新对话',
-        date: new Date().toLocaleString(),
-        messages: []
-      })
-    }
-  }, [])
+    setMessages(history.messages)
+  }, [params.id, router])
 
   const handleFileUpload = async (file: File) => {
     try {
@@ -53,23 +38,24 @@ export default function Home() {
       const audioUrl = URL.createObjectURL(file)
       const messageId = nanoid()
       const transcriptionId = nanoid()
-      currentMessageId.current = transcriptionId
       
       // 创建用户的录音消息
-      setMessages(prev => [...prev, {
-        id: messageId,
-        role: 'user',
-        content: '',
-        audioUrl,
-      }])
-
-      // 创建转录中的消息
-      setMessages(prev => [...prev, {
-        id: transcriptionId,
-        role: 'assistant',
-        content: '',
-        isTranscribing: true
-      }])
+      const newMessages = [
+        ...messages,
+        {
+          id: messageId,
+          role: 'user' as const,
+          content: '',
+          audioUrl,
+        },
+        {
+          id: transcriptionId,
+          role: 'assistant' as const,
+          content: '',
+          isTranscribing: true
+        }
+      ]
+      setMessages(newMessages)
 
       // 开始转录并实时更新
       const transcriber = transcribeAudio(file, {
@@ -83,13 +69,11 @@ export default function Home() {
       try {
         for await (const text of transcriber) {
           fullText += text
-          if (currentMessageId.current === transcriptionId) {
-            setMessages(prev => prev.map(msg =>
-              msg.id === transcriptionId
-                ? { ...msg, content: fullText }
-                : msg
-            ))
-          }
+          setMessages(prev => prev.map(msg =>
+            msg.id === transcriptionId
+              ? { ...msg, content: fullText }
+              : msg
+          ))
         }
       } catch (error) {
         console.error('转录过程出错:', error)
@@ -108,16 +92,26 @@ export default function Home() {
           : msg
       ))
 
+      // 更新历史记录
+      updateHistory(params.id, {
+        messages: newMessages,
+        date: new Date().toLocaleString()
+      })
+
     } catch (error) {
       console.error('处理音频失败:', error)
-      setMessages(prev => [...prev, {
+      const errorMessage = {
         id: nanoid(),
-        role: 'assistant',
+        role: 'assistant' as const,
         content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`,
-      }])
+      }
+      setMessages(prev => [...prev, errorMessage])
+      updateHistory(params.id, {
+        messages: [...messages, errorMessage],
+        date: new Date().toLocaleString()
+      })
     } finally {
       setIsLoading(false)
-      currentMessageId.current = null
     }
   }
 
@@ -126,24 +120,25 @@ export default function Home() {
       setIsLoading(true)
       const messageId = nanoid()
       const transcriptionId = nanoid()
-      currentMessageId.current = transcriptionId
 
       // 创建用户的录音消息
       const audioUrl = URL.createObjectURL(audioBlob)
-      setMessages(prev => [...prev, {
-        id: messageId,
-        role: 'user',
-        content: '',
-        audioUrl,
-      }])
-
-      // 创建转录中的消息
-      setMessages(prev => [...prev, {
-        id: transcriptionId,
-        role: 'assistant',
-        content: '',
-        isTranscribing: true
-      }])
+      const newMessages = [
+        ...messages,
+        {
+          id: messageId,
+          role: 'user' as const,
+          content: '',
+          audioUrl,
+        },
+        {
+          id: transcriptionId,
+          role: 'assistant' as const,
+          content: '',
+          isTranscribing: true
+        }
+      ]
+      setMessages(newMessages)
       
       // 开始转录并实时更新
       const transcriber = transcribeAudio(audioBlob, {
@@ -157,13 +152,11 @@ export default function Home() {
       try {
         for await (const text of transcriber) {
           fullText += text
-          if (currentMessageId.current === transcriptionId) {
-            setMessages(prev => prev.map(msg =>
-              msg.id === transcriptionId
-                ? { ...msg, content: fullText }
-                : msg
-            ))
-          }
+          setMessages(prev => prev.map(msg =>
+            msg.id === transcriptionId
+              ? { ...msg, content: fullText }
+              : msg
+          ))
         }
       } catch (error) {
         console.error('转录过程出错:', error)
@@ -182,16 +175,26 @@ export default function Home() {
           : msg
       ))
 
+      // 更新历史记录
+      updateHistory(params.id, {
+        messages: newMessages,
+        date: new Date().toLocaleString()
+      })
+
     } catch (error) {
       console.error('转录失败:', error)
-      setMessages(prev => [...prev, {
+      const errorMessage = {
         id: nanoid(),
-        role: 'assistant',
+        role: 'assistant' as const,
         content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`,
-      }])
+      }
+      setMessages(prev => [...prev, errorMessage])
+      updateHistory(params.id, {
+        messages: [...messages, errorMessage],
+        date: new Date().toLocaleString()
+      })
     } finally {
       setIsLoading(false)
-      currentMessageId.current = null
     }
   }
 
@@ -214,4 +217,4 @@ export default function Home() {
       </div>
     </div>
   )
-}
+} 
