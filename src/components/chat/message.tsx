@@ -7,32 +7,40 @@ interface MessageProps {
   content: string
   isUser: boolean
   audioUrl?: string
+  isTranscribing?: boolean
 }
 
-export function Message({ content, isUser, audioUrl }: MessageProps) {
+export function Message({ content, isUser, audioUrl, isTranscribing }: MessageProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        'flex w-full gap-4 p-4',
-        isUser ? 'justify-end' : 'justify-start'
-      )}
-    >
-      <div
-        className={cn(
-          'flex max-w-[80%] flex-col gap-2 rounded-lg p-4',
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
-        )}
-      >
-        {audioUrl && (
-          <audio controls className="max-w-full">
-            <source src={audioUrl} type="audio/wav" />
-            Your browser does not support the audio element.
-          </audio>
-        )}
-        <p className="whitespace-pre-wrap break-words">{content}</p>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div className={`flex max-w-[80%] ${isUser ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+          isUser ? 'bg-primary' : 'bg-secondary'
+        }`}>
+          {isUser ? '我' : 'AI'}
+        </div>
+        <div className={`rounded-lg p-4 ${
+          isUser 
+            ? 'bg-primary text-primary-foreground' 
+            : 'bg-secondary text-secondary-foreground'
+        }`}>
+          {audioUrl ? (
+            <audio 
+              src={audioUrl} 
+              controls 
+              className="max-w-full" 
+              controlsList="nodownload"
+            />
+          ) : (
+            <div className="whitespace-pre-wrap">
+              {content}
+              {isTranscribing && (
+                <span className="ml-2 animate-pulse">▋</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </motion.div>
+    </div>
   )
 } 
