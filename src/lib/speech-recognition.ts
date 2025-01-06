@@ -153,13 +153,13 @@ export class SpeechRecognition {
       console.log('开始处理录音数据:', audioBlob.type)
       
       // 将 Blob 转换为 File，使用正确的文件扩展名和MIME类型
-      const file = new File([audioBlob], 'recording.webm', { 
+      const file = new File([audioBlob], `录音_${new Date().toLocaleTimeString().replace(/:/g, '-')}.webm`, { 
         type: 'audio/webm'
       })
       
       // 使用相同的上传处理流程
       await this.uploadAudio(file)
-
+      
     } catch (error) {
       console.error('处理录音数据失败:', error)
       throw error

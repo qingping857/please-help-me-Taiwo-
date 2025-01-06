@@ -77,6 +77,7 @@ export function MainContent() {
     console.log('收到转写结果:', { text, fileId })
     
     if (fileId) {
+      // 处理文件上传的转写结果
       setFileQueue(prev => {
         // 更新当前文件的状态和文本
         const newQueue = prev.map(f => 
@@ -108,8 +109,15 @@ export function MainContent() {
         return newQueue
       })
     } else {
-      // 这是录音的情况，直接更新显示文本
-      setTranscribedText(text)
+      // 处理录音的转写结果
+      if (text) {  // 只有当有文本时才更新
+        setTranscribedText(prev => {
+          const timestamp = new Date().toLocaleTimeString()
+          const newText = `录音 (${timestamp}):\n${text}`
+          return prev ? `${prev}\n\n${newText}` : newText
+        })
+      }
+      setIsTranscribing(false)
     }
   }
   
@@ -160,6 +168,7 @@ export function MainContent() {
       setIsTranscribing(true)
       const audioBlob = await speechRecognition.stopRecording()
       await speechRecognition.handleRecordedAudio(audioBlob)
+      setIsTranscribing(false)
     } catch (error) {
       toast({
         title: "处理录音失败",
@@ -284,30 +293,36 @@ export function MainContent() {
           </Card>
 
           {/* 录制按钮 */}
-          <Card className="w-[200px] flex items-center justify-center rounded-xl">
-            <Button
-              size="lg"
-              className={`w-[160px] h-[160px] rounded-xl ${
-                isRecording 
-                  ? "bg-red-500 hover:bg-red-600" 
-                  : "bg-blue-500 hover:bg-blue-600"
-              }`}
-              onClick={isRecording ? handleStopRecording : handleStartRecording}
-            >
-              <div className="flex flex-col items-center gap-2">
-                {isRecording ? (
-                  <>
+          <Card className="w-[200px] flex items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-purple-50 p-5">
+            <div className="flex flex-col items-center gap-4 w-full">
+              <Button
+                size="lg"
+                className={`w-[120px] h-[120px] rounded-full transition-all duration-300 ${
+                  isRecording 
+                    ? "bg-red-500 hover:bg-red-600 animate-slow-pulse" 
+                    : "bg-blue-500 hover:bg-blue-600"
+                }`}
+                onClick={isRecording ? handleStopRecording : handleStartRecording}
+              >
+                <div className="flex flex-col items-center gap-2">
+                  {isRecording ? (
                     <StopCircle className="h-8 w-8" />
-                    <span>停止录音</span>
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <Mic className="h-8 w-8" />
-                    <span>开始录音</span>
-                  </>
+                  )}
+                </div>
+              </Button>
+
+              <div className="text-center">
+                {isRecording ? (
+                  <div className="flex flex-col items-center">
+                    <span className="text-red-500 font-medium">录音中</span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">点击开始录音</span>
                 )}
               </div>
-            </Button>
+            </div>
           </Card>
         </div>
 
