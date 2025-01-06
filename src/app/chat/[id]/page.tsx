@@ -52,8 +52,8 @@ export default function ChatPage() {
       }
       setMessages(prev => [...prev, transcriptMessage])
 
-      // 3. 创建 SpeechRecognition 实例
-      speechRecognitionRef.current = new SpeechRecognition((text) => {
+      // 3. 获取 SpeechRecognition 实例
+      speechRecognitionRef.current = SpeechRecognition.getInstance((text) => {
         // 更新转写消息
         setMessages(prev => prev.map(msg => 
           msg.id === transcriptMessage.id 
@@ -85,8 +85,8 @@ export default function ChatPage() {
   // 开始录音
   const handleStartRecording = async () => {
     try {
-      // 1. 创建 SpeechRecognition 实例
-      speechRecognitionRef.current = new SpeechRecognition((text) => {
+      // 1. 获取 SpeechRecognition 实例
+      speechRecognitionRef.current = SpeechRecognition.getInstance((text) => {
         // 更新转写消息
         setMessages(prev => prev.map(msg => 
           msg.role === 'assistant' && msg.isTranscribing

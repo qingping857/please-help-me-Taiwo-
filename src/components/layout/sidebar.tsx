@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { nanoid } from "nanoid"
 
 export function Sidebar() {
   const [isMobileOpen, setIsMobileOpen] = useState(false)
@@ -30,7 +31,24 @@ export function Sidebar() {
 
   // 新建对话
   const handleNewChat = () => {
-    router.push('/')
+    const id = nanoid()
+    const newHistory: HistoryItem = {
+      id,
+      title: '新建转写任务',
+      date: new Date().toLocaleString(),
+      messages: []
+    }
+    
+    // 添加到历史记录
+    const histories = getHistories()
+    histories.unshift(newHistory)
+    localStorage.setItem('chat-histories', JSON.stringify(histories))
+    
+    // 更新状态
+    setHistories(histories)
+    
+    // 跳转到新任务页面
+    router.push(`/chat/${id}`)
     setIsMobileOpen(false)
   }
 

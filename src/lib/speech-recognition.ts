@@ -1,18 +1,28 @@
-import { AssemblyAI } from 'assemblyai'
+import { AssemblyAI, TranscriptParams } from 'assemblyai'
 import { ASSEMBLYAI_API_KEY, speechRecognitionConfig } from './assemblyai'
 import { isFormatSupported } from './config'
 
 export class SpeechRecognition {
-  private onTranscript: (text: string) => void
+  private onTranscript: (text: string, fileId?: string) => void
   private mediaRecorder: MediaRecorder | null = null
   private audioChunks: Blob[] = []
   private client: AssemblyAI
+  private static instance: SpeechRecognition | null = null
 
-  constructor(onTranscript: (text: string) => void) {
+  private constructor(onTranscript: (text: string, fileId?: string) => void) {
     this.onTranscript = onTranscript
     this.client = new AssemblyAI({
       apiKey: ASSEMBLYAI_API_KEY
     })
+  }
+
+  // 使用单例模式
+  static getInstance(onTranscript: (text: string, fileId?: string) => void): SpeechRecognition {
+    if (!SpeechRecognition.instance) {
+      SpeechRecognition.instance = new SpeechRecognition(onTranscript)
+    }
+    SpeechRecognition.instance.onTranscript = onTranscript
+    return SpeechRecognition.instance
   }
 
   // 开始录音
@@ -62,7 +72,7 @@ export class SpeechRecognition {
   }
 
   // 上传音频文件
-  async uploadAudio(audioFile: File) {
+  async uploadAudio(audioFile: File, fileId?: string) {
     try {
       console.log('开始上传音频文件:', audioFile.type)
       
@@ -75,26 +85,58 @@ export class SpeechRecognition {
       const uploadUrl = await this.client.files.upload(audioFile)
       console.log('文件上传成功:', uploadUrl)
 
+      // 等待一段时间，确保文件已被 AssemblyAI 处理
+      await new Promise(resolve => setTimeout(resolve, 2000))
+
       // 2. 创建转写任务
-      const transcript = await this.client.transcripts.create({
+      const transcriptParams: TranscriptParams = {
         audio_url: uploadUrl,
-        ...speechRecognitionConfig
-      })
+        speech_model: speechRecognitionConfig.speech_model,
+        punctuate: speechRecognitionConfig.punctuate,
+        format_text: speechRecognitionConfig.format_text,
+        language_detection: speechRecognitionConfig.language_detection,
+        language_code: speechRecognitionConfig.language_code,
+        disfluencies: speechRecognitionConfig.disfluencies,
+        filter_profanity: speechRecognitionConfig.filter_profanity
+      }
+      const transcript = await this.client.transcripts.create(transcriptParams)
       console.log('转写任务创建成功:', transcript.id)
+
+      // 等待一段时间，确保转写任务已开始
+      await new Promise(resolve => setTimeout(resolve, 2000))
 
       // 3. 获取转写结果
       let result = await this.client.transcripts.get(transcript.id)
+      let retryCount = 0
+      const maxRetries = 10
       
       // 4. 等待转写完成
       while (result.status !== 'completed' && result.status !== 'error') {
+        if (retryCount >= maxRetries) {
+          throw new Error('转写超时')
+        }
+
         await new Promise(resolve => setTimeout(resolve, 3000))
-        result = await this.client.transcripts.get(transcript.id)
-        console.log('转写状态:', result.status)
+        
+        try {
+          result = await this.client.transcripts.get(transcript.id)
+          console.log('转写状态:', result.status, '重试次数:', retryCount)
+          retryCount++
+        } catch (error) {
+          console.error('获取转写状态失败:', error)
+          retryCount++
+          continue
+        }
       }
 
       if (result.status === 'completed' && result.text) {
         console.log('转写完成')
-        this.onTranscript(result.text)
+        // 如果有 fileId，将其传递给回调函数
+        if (fileId) {
+          this.onTranscript(result.text, fileId)
+        } else {
+          this.onTranscript(result.text)
+        }
       } else if (result.status === 'error') {
         throw new Error('转写失败: ' + result.error)
       }
