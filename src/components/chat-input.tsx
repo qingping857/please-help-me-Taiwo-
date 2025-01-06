@@ -1,80 +1,112 @@
-import { useRef } from 'react'
-import { Button } from './ui/button'
-import { Input } from './ui/input'
-import { Mic, Square, Upload } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Mic, MicOff, Upload } from 'lucide-react'
 
-interface ChatInputProps {
+export interface ChatInputProps {
   onFileUpload: (file: File) => Promise<void>
-  onStartRecording: () => Promise<void>
-  onStopRecording: () => void
-  isLoading: boolean
+  onRecordedAudio: (audioBlob: Blob) => Promise<void>
 }
 
-export function ChatInput({ 
-  onFileUpload, 
-  onStartRecording, 
-  onStopRecording, 
-  isLoading 
-}: ChatInputProps) {
+export function ChatInput({ onFileUpload, onRecordedAudio }: ChatInputProps) {
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+
+  // 处理文件上传
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
     if (file) {
-      await onFileUpload(file)
-      event.target.value = ''
+      try {
+        await onFileUpload(file)
+      } catch (error) {
+        console.error('文件上传失败:', error)
+      }
+      // 重置 input
+      e.target.value = ''
     }
   }
 
-  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    const file = event.dataTransfer.files[0]
-    if (file && file.type.startsWith('audio/')) {
-      await onFileUpload(file)
+  // 开始录音
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
+        audioChunksRef.current = []
+        
+        try {
+          await onRecordedAudio(audioBlob)
+        } catch (error) {
+          console.error('处理录音失败:', error)
+        }
+        
+        // 停止所有音轨
+        stream.getTracks().forEach(track => track.stop())
+      }
+
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+      setIsRecording(true)
+
+    } catch (error) {
+      console.error('开始录音失败:', error)
+    }
+  }
+
+  // 停止录音
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  // 处理录音按钮点击
+  const handleRecordClick = () => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      startRecording()
     }
   }
 
   return (
-    <div
-      className="flex items-center gap-2 p-4"
-      onDrop={handleDrop}
-      onDragOver={(e) => e.preventDefault()}
-    >
-      <Input
-        ref={fileInputRef}
+    <div className="flex items-center gap-2">
+      <input
         type="file"
-        accept="audio/*"
+        ref={fileInputRef}
         className="hidden"
+        accept="audio/*"
         onChange={handleFileChange}
-        disabled={isLoading}
       />
       <Button
         variant="outline"
         size="icon"
         onClick={() => fileInputRef.current?.click()}
-        disabled={isLoading}
       >
         <Upload className="h-4 w-4" />
       </Button>
       <Button
-        variant="outline"
+        variant={isRecording ? 'destructive' : 'outline'}
         size="icon"
-        onClick={onStartRecording}
-        disabled={isLoading}
+        onClick={handleRecordClick}
       >
-        <Mic className="h-4 w-4" />
+        {isRecording ? (
+          <MicOff className="h-4 w-4" />
+        ) : (
+          <Mic className="h-4 w-4" />
+        )}
       </Button>
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={onStopRecording}
-        disabled={!isLoading}
-      >
-        <Square className="h-4 w-4" />
-      </Button>
-      <div className="flex-1 rounded-md border bg-muted px-4 py-2 text-sm text-muted-foreground">
-        拖放音频文件到这里，或点击上传/录音按钮
-      </div>
     </div>
   )
 } 

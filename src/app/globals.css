@@ -92,3 +92,19 @@
 .dark ::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.2);
 }
+
+/* 自定义音频播放器样式 */
+audio {
+  border: none;
+  border-radius: 9999px;
+  background-color: transparent;
+}
+
+audio::-webkit-media-controls-panel {
+  background-color: transparent;
+}
+
+audio::-webkit-media-controls-current-time-display,
+audio::-webkit-media-controls-time-remaining-display {
+  color: inherit;
+}

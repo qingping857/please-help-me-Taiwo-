@@ -1,217 +1,175 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useRef } from 'react'
+import { useRouter, useParams } from 'next/navigation'
 import { ChatList } from '@/components/chat/chat-list'
 import { ChatInput } from '@/components/chat/chat-input'
 import { getHistories, updateHistory } from '@/lib/history'
-import { transcribeAudio } from '@/lib/whisper'
+import { SpeechRecognition } from '@/lib/speech-recognition'
 import { nanoid } from 'nanoid'
+import { Message } from '@/types'
 
-interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  audioUrl?: string
-  isTranscribing?: boolean
-}
-
-export default function ChatPage({ params }: { params: { id: string } }) {
+export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
   const router = useRouter()
+  const params = useParams()
+  const chatId = params?.id as string
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null)
 
   // 加载历史记录
   useEffect(() => {
+    if (!chatId) return
+    
     const histories = getHistories()
-    const history = histories.find(h => h.id === params.id)
+    const history = histories.find(h => h.id === chatId)
     if (!history) {
       router.push('/')
       return
     }
     setMessages(history.messages)
-  }, [params.id, router])
+  }, [chatId, router])
 
+  // 处理文件上传
   const handleFileUpload = async (file: File) => {
     try {
-      setIsLoading(true)
-      const audioUrl = URL.createObjectURL(file)
-      const messageId = nanoid()
-      const transcriptionId = nanoid()
-      
-      // 创建用户的录音消息
-      const newMessages = [
-        ...messages,
-        {
-          id: messageId,
-          role: 'user' as const,
-          content: '',
-          audioUrl,
-        },
-        {
-          id: transcriptionId,
-          role: 'assistant' as const,
-          content: '',
-          isTranscribing: true
-        }
-      ]
-      setMessages(newMessages)
+      // 1. 创建用户消息
+      const userMessage: Message = {
+        id: nanoid(),
+        role: 'user',
+        content: '正在处理音频文件...',
+        audioUrl: URL.createObjectURL(file),
+        isTranscribing: true
+      }
+      setMessages(prev => [...prev, userMessage])
 
-      // 开始转录并实时更新
-      const transcriber = transcribeAudio(file, {
-        language: 'zh',
-        response_format: 'verbose_json',
-        temperature: 0,
-      })
-      
-      let fullText = ''
-      
-      try {
-        for await (const text of transcriber) {
-          fullText += text
-          setMessages(prev => prev.map(msg =>
-            msg.id === transcriptionId
-              ? { ...msg, content: fullText }
-              : msg
-          ))
-        }
-      } catch (error) {
-        console.error('转录过程出错:', error)
-        setMessages(prev => prev.map(msg =>
-          msg.id === transcriptionId
-            ? { ...msg, content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`, isTranscribing: false }
+      // 2. 创建转写消息
+      const transcriptMessage: Message = {
+        id: nanoid(),
+        role: 'assistant',
+        content: '正在转写...',
+        isTranscribing: true
+      }
+      setMessages(prev => [...prev, transcriptMessage])
+
+      // 3. 创建 SpeechRecognition 实例
+      speechRecognitionRef.current = new SpeechRecognition((text) => {
+        // 更新转写消息
+        setMessages(prev => prev.map(msg => 
+          msg.id === transcriptMessage.id 
+            ? { ...msg, content: text, isTranscribing: false }
             : msg
         ))
-        return
-      }
+      })
 
-      // 完成转录
-      setMessages(prev => prev.map(msg =>
-        msg.id === transcriptionId
-          ? { ...msg, isTranscribing: false }
-          : msg
-      ))
+      // 4. 开始处理音频文件
+      await speechRecognitionRef.current.uploadAudio(file)
 
-      // 更新历史记录
-      updateHistory(params.id, {
-        messages: newMessages,
+      // 5. 更新历史记录
+      updateHistory(chatId, {
+        messages: messages,
         date: new Date().toLocaleString()
       })
 
     } catch (error) {
-      console.error('处理音频失败:', error)
-      const errorMessage = {
-        id: nanoid(),
-        role: 'assistant' as const,
-        content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`,
-      }
-      setMessages(prev => [...prev, errorMessage])
-      updateHistory(params.id, {
-        messages: [...messages, errorMessage],
-        date: new Date().toLocaleString()
-      })
-    } finally {
-      setIsLoading(false)
+      console.error('处理音频文件失败:', error)
+      // 显示错误消息
+      setMessages(prev => prev.map(msg => 
+        msg.role === 'assistant' && msg.isTranscribing
+          ? { ...msg, content: `转写失败: ${error instanceof Error ? error.message : '未知错误'}`, isTranscribing: false }
+          : msg
+      ))
     }
   }
 
-  const handleRecordedAudio = async (audioBlob: Blob) => {
+  // 开始录音
+  const handleStartRecording = async () => {
     try {
-      setIsLoading(true)
-      const messageId = nanoid()
-      const transcriptionId = nanoid()
-
-      // 创建用户的录音消息
-      const audioUrl = URL.createObjectURL(audioBlob)
-      const newMessages = [
-        ...messages,
-        {
-          id: messageId,
-          role: 'user' as const,
-          content: '',
-          audioUrl,
-        },
-        {
-          id: transcriptionId,
-          role: 'assistant' as const,
-          content: '',
-          isTranscribing: true
-        }
-      ]
-      setMessages(newMessages)
-      
-      // 开始转录并实时更新
-      const transcriber = transcribeAudio(audioBlob, {
-        language: 'zh',
-        response_format: 'verbose_json',
-        temperature: 0,
-      })
-      
-      let fullText = ''
-      
-      try {
-        for await (const text of transcriber) {
-          fullText += text
-          setMessages(prev => prev.map(msg =>
-            msg.id === transcriptionId
-              ? { ...msg, content: fullText }
-              : msg
-          ))
-        }
-      } catch (error) {
-        console.error('转录过程出错:', error)
-        setMessages(prev => prev.map(msg =>
-          msg.id === transcriptionId
-            ? { ...msg, content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`, isTranscribing: false }
+      // 1. 创建 SpeechRecognition 实例
+      speechRecognitionRef.current = new SpeechRecognition((text) => {
+        // 更新转写消息
+        setMessages(prev => prev.map(msg => 
+          msg.role === 'assistant' && msg.isTranscribing
+            ? { ...msg, content: text, isTranscribing: false }
             : msg
         ))
-        return
+      })
+
+      // 2. 开始录音
+      await speechRecognitionRef.current.startRecording()
+      setIsRecording(true)
+
+    } catch (error) {
+      console.error('开始录音失败:', error)
+      alert('开始录音失败: ' + (error instanceof Error ? error.message : '未知错误'))
+    }
+  }
+
+  // 停止录音
+  const handleStopRecording = async () => {
+    try {
+      if (!speechRecognitionRef.current) {
+        throw new Error('SpeechRecognition not initialized')
       }
 
-      // 完成转录
-      setMessages(prev => prev.map(msg =>
-        msg.id === transcriptionId
-          ? { ...msg, isTranscribing: false }
-          : msg
-      ))
+      // 1. 停止录音并获取音频数据
+      const audioBlob = await speechRecognitionRef.current.stopRecording()
+      setIsRecording(false)
 
-      // 更新历史记录
-      updateHistory(params.id, {
-        messages: newMessages,
+      // 2. 创建用户消息
+      const userMessage: Message = {
+        id: nanoid(),
+        role: 'user',
+        content: '正在处理录音...',
+        audioUrl: URL.createObjectURL(audioBlob),
+        isTranscribing: true
+      }
+      setMessages(prev => [...prev, userMessage])
+
+      // 3. 创建转写消息
+      const transcriptMessage: Message = {
+        id: nanoid(),
+        role: 'assistant',
+        content: '正在转写...',
+        isTranscribing: true
+      }
+      setMessages(prev => [...prev, transcriptMessage])
+
+      // 4. 处理录音数据
+      await speechRecognitionRef.current.handleRecordedAudio(audioBlob)
+
+      // 5. 更新历史记录
+      updateHistory(chatId, {
+        messages: messages,
         date: new Date().toLocaleString()
       })
 
     } catch (error) {
-      console.error('转录失败:', error)
-      const errorMessage = {
-        id: nanoid(),
-        role: 'assistant' as const,
-        content: `转录失败: ${error instanceof Error ? error.message : '未知错误'}`,
-      }
-      setMessages(prev => [...prev, errorMessage])
-      updateHistory(params.id, {
-        messages: [...messages, errorMessage],
-        date: new Date().toLocaleString()
-      })
-    } finally {
-      setIsLoading(false)
+      console.error('停止录音失败:', error)
+      setIsRecording(false)
+      // 显示错误消息
+      setMessages(prev => prev.map(msg => 
+        msg.role === 'assistant' && msg.isTranscribing
+          ? { ...msg, content: `转写失败: ${error instanceof Error ? error.message : '未知错误'}`, isTranscribing: false }
+          : msg
+      ))
     }
+  }
+
+  if (!chatId) {
+    return null
   }
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background">
-      <ChatList messages={messages.map(msg => ({
-        id: msg.id,
-        content: msg.content,
-        isUser: msg.role === 'user',
-        audioUrl: msg.audioUrl,
-        isTranscribing: msg.isTranscribing
-      }))} />
+      <ChatList messages={messages} />
       <div className="border-t bg-background p-4">
         <div className="container mx-auto max-w-4xl">
-          <ChatInput
-            onSendAudio={handleRecordedAudio}
+          <ChatInput 
             onSendFile={handleFileUpload}
+            onSendAudio={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            isRecording={isRecording}
           />
         </div>
       </div>

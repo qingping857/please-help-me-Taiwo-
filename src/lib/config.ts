@@ -1,46 +1,71 @@
+export const SUPPORTED_AUDIO_FORMATS = [
+  '3ga', '8svx', 'aac', 'ac3', 'aif', 'aiff', 'alac', 'amr',
+  'ape', 'au', 'dss', 'flac', 'flv', 'm4a', 'm4b', 'm4p',
+  'm4r', 'mp3', 'mpga', 'ogg', 'oga', 'mogg', 'opus', 'qcp',
+  'tta', 'voc', 'wav', 'wma', 'wv'
+] as const;
+
+export const SUPPORTED_VIDEO_FORMATS = [
+  'mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'
+] as const;
+
+export type SupportedAudioFormat = typeof SUPPORTED_AUDIO_FORMATS[number];
+export type SupportedVideoFormat = typeof SUPPORTED_VIDEO_FORMATS[number];
+
 interface Config {
-  aliyun: {
-    accessKeyId: string
-    accessKeySecret: string
-    appKey: string
-  }
+  assemblyai: {
+    apiKey: string;
+    baseUrl: string;
+    maxFileSize: number; // 以字节为单位
+    supportedFormats: {
+      audio: typeof SUPPORTED_AUDIO_FORMATS;
+      video: typeof SUPPORTED_VIDEO_FORMATS;
+    };
+  };
 }
 
-let config: Config | null = null
+let config: Config | null = null;
 
 export async function initConfig(): Promise<void> {
   try {
-    // 获取公开配置
-    const publicConfigResponse = await fetch('/api/aliyun/config')
-    const publicConfig = await publicConfigResponse.json()
-
     config = {
-      aliyun: {
-        accessKeyId: '',  // 这些值只在服务器端使用
-        accessKeySecret: '', // 这些值只在服务器端使用
-        appKey: publicConfig.appKey
+      assemblyai: {
+        apiKey: process.env.NEXT_PUBLIC_ASSEMBLYAI_API_KEY || '',
+        baseUrl: 'https://api.assemblyai.com/v2',
+        maxFileSize: 1024 * 1024 * 1000, // 1GB
+        supportedFormats: {
+          audio: SUPPORTED_AUDIO_FORMATS,
+          video: SUPPORTED_VIDEO_FORMATS
+        }
       }
-    }
+    };
   } catch (error) {
-    console.error('获取配置失败:', error)
-    throw new Error('获取配置失败')
+    console.error('Failed to initialize config:', error);
+    throw new Error('Failed to initialize config');
   }
 }
 
 export function getConfig(): Config {
   if (!config) {
-    throw new Error('配置未初始化，请先调用 initConfig()')
+    throw new Error('Config not initialized. Please call initConfig() first');
   }
-  return config
+  return config;
 }
 
-// 服务器端直接使用环境变量
-export function getServerConfig(): Config {
-  return {
-    aliyun: {
-      accessKeyId: process.env.ALIYUN_ACCESS_KEY_ID || '',
-      accessKeySecret: process.env.ALIYUN_ACCESS_KEY_SECRET || '',
-      appKey: process.env.NEXT_PUBLIC_ALIYUN_APP_KEY || ''
-    }
+// 检查文件格式是否支持
+export function isFormatSupported(filename: string): boolean {
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  return [...SUPPORTED_AUDIO_FORMATS, ...SUPPORTED_VIDEO_FORMATS].includes(extension as any);
+}
+
+// 获取文件格式类型（音频或视频）
+export function getFileType(filename: string): 'audio' | 'video' | null {
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  if (SUPPORTED_AUDIO_FORMATS.includes(extension as any)) {
+    return 'audio';
   }
+  if (SUPPORTED_VIDEO_FORMATS.includes(extension as any)) {
+    return 'video';
+  }
+  return null;
 } 

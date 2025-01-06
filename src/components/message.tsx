@@ -7,23 +7,37 @@ interface MessageProps {
 }
 
 export function Message({ role, content, audioUrl }: MessageProps) {
+  const isUser = role === 'user'
+  
   return (
     <div
       className={cn(
         'flex w-full items-start gap-4 p-4',
-        role === 'assistant' ? 'bg-muted/50' : 'bg-white'
+        isUser ? 'bg-white justify-end' : 'bg-muted/50'
       )}
     >
-      <div className="flex-1 space-y-2">
-        <div className="prose break-words">
-          {role === 'user' && audioUrl && (
-            <audio
-              src={audioUrl}
-              controls
-              className="mb-2 w-full max-w-[300px]"
-            />
+      <div
+        className={cn(
+          'flex-1 space-y-2 max-w-3xl',
+          isUser && 'flex flex-col items-end'
+        )}
+      >
+        <div
+          className={cn(
+            'break-words rounded-lg p-3',
+            isUser ? 'bg-primary text-primary-foreground' : 'bg-background'
           )}
-          <p>{content}</p>
+        >
+          {isUser && audioUrl && (
+            <div className="mb-2">
+              <audio
+                src={audioUrl}
+                controls
+                className="w-full max-w-[300px] [&::-webkit-media-controls-panel]:!bg-primary-foreground/10"
+              />
+            </div>
+          )}
+          <p className="m-0 text-base leading-relaxed">{content}</p>
         </div>
       </div>
     </div>
