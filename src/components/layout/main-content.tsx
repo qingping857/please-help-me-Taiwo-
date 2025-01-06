@@ -30,17 +30,22 @@ export function MainContent() {
   const processFileQueue = async () => {
     // 检查是否有正在处理的文件
     const isProcessing = fileQueue.some(f => f.status === 'processing')
-    if (isProcessing) return
+    if (isProcessing) {
+      console.log('已有文件正在处理中，等待完成...')
+      return
+    }
 
     // 获取第一个等待处理的文件
     const currentFile = fileQueue.find(f => f.status === 'waiting')
     if (!currentFile) {
+      console.log('没有待处理的文件，重置状态...')
       setIsTranscribing(false)
       setQueueProcessingState('idle')
       return
     }
 
     try {
+      console.log('开始处理文件:', currentFile.file.name)
       // 更新状态为处理中
       setFileQueue(prev => prev.map(f => 
         f.id === currentFile.id ? { ...f, status: 'processing' as const } : f
@@ -67,7 +72,7 @@ export function MainContent() {
         variant: "destructive"
       })
 
-      // 出错时也要更新队列状态
+      // 出错时也要重置队列状态以继续处理下一个文件
       setQueueProcessingState('idle')
     }
   }
@@ -88,26 +93,29 @@ export function MainContent() {
           } : f
         )
 
-        // 获取所有已完成的文件文本
-        const completedTexts = newQueue
-          .filter(f => f.status === 'completed' || f.id === fileId)
+        // 立即更新显示文本 - 包括所有已完成的文件和当前刚完成的文件
+        const allCompletedTexts = newQueue
+          .filter(f => f.status === 'completed')
           .map(f => {
             const fileText = f.id === fileId ? text : f.text
             return `${f.file.name}:\n${fileText}`
           })
+          .filter(text => text) // 过滤掉空文本
 
         // 更新显示文本
-        setTranscribedText(completedTexts.join('\n\n'))
-
-        // 检查是否还有等待的文件
-        const hasMore = newQueue.some(f => f.status === 'waiting')
-        if (!hasMore) {
-          setIsTranscribing(false)
-          setQueueProcessingState('idle')
-        }
+        setTranscribedText(allCompletedTexts.join('\n\n'))
 
         return newQueue
       })
+
+      // 当一个文件处理完成后，重置队列状态以触发下一个文件的处理
+      setQueueProcessingState('idle')
+      
+      // 如果没有更多等待处理的文件，重置转录状态
+      const remainingFiles = fileQueue.filter(f => f.status === 'waiting').length
+      if (remainingFiles === 0) {
+        setIsTranscribing(false)
+      }
     } else {
       // 处理录音的转写结果
       if (text) {  // 只有当有文本时才更新
@@ -328,38 +336,34 @@ export function MainContent() {
 
         {/* 转写文本输出区域 */}
         <Card className="flex-1 p-6 rounded-xl h-[300px]">
-          {isTranscribing ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              >
-                <Loader2 className="h-8 w-8" />
-              </motion.div>
-              <motion.p
-                animate={{ opacity: [0.5, 1, 0.5] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                正在处理音频文件...
-              </motion.p>
-            </div>
-          ) : (
-            <div className="h-full overflow-y-auto pr-2 custom-scrollbar">
-              {transcribedText ? (
+          <div className="h-full overflow-y-auto pr-2 custom-scrollbar">
+            {transcribedText ? (
+              <div className="flex flex-col h-full">
                 <motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="whitespace-pre-wrap break-words"
+                  className="whitespace-pre-wrap break-words flex-1"
                 >
                   {transcribedText}
                 </motion.div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  转写的文本将显示在这里
-                </div>
-              )}
-            </div>
-          )}
+                
+                {isTranscribing && (
+                  <motion.div 
+                    className="flex items-center justify-center gap-2 text-muted-foreground mt-4 pt-4 border-t"
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>正在转录下一个文件...</span>
+                  </motion.div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                转写的文本将显示在这里
+              </div>
+            )}
+          </div>
         </Card>
       </div>
     </div>
