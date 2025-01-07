@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Menu, Plus, Trash } from "lucide-react"
 import { useEffect, useState } from "react"
-import { type HistoryItem, getHistories, deleteHistory, clearHistories } from "@/lib/history"
-import { useRouter } from "next/navigation"
+import { type HistoryItem, getHistories, deleteHistory, clearHistories, saveHistories } from "@/lib/history"
+import { useRouter, usePathname } from "next/navigation"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,17 +20,21 @@ import {
 import { nanoid } from "nanoid"
 
 export function Sidebar() {
+  const router = useRouter()
+  const pathname = usePathname()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
   const [histories, setHistories] = useState<HistoryItem[]>([])
-  const router = useRouter()
 
   // 加载历史记录
   useEffect(() => {
     setHistories(getHistories())
-  }, [])
+  }, [pathname]) // 当路径变化时重新加载历史记录
 
   // 新建对话
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    // 先关闭移动端菜单
+    setIsMobileOpen(false)
+
     const id = nanoid()
     const newHistory: HistoryItem = {
       id,
@@ -42,14 +46,13 @@ export function Sidebar() {
     // 添加到历史记录
     const histories = getHistories()
     histories.unshift(newHistory)
-    localStorage.setItem('chat-histories', JSON.stringify(histories))
+    saveHistories(histories)
     
     // 更新状态
     setHistories(histories)
     
     // 跳转到新任务页面
-    router.push(`/chat/${id}`)
-    setIsMobileOpen(false)
+    router.replace(`/chat/${id}`)
   }
 
   // 删除单个历史记录
@@ -66,8 +69,13 @@ export function Sidebar() {
 
   // 选择历史记录
   const handleSelectHistory = (history: HistoryItem) => {
-    router.push(`/chat/${history.id}`)
+    // 先关闭移动端菜单
     setIsMobileOpen(false)
+    
+    // 确保当前不在相同页面时才进行跳转
+    if (pathname !== `/chat/${history.id}`) {
+      router.replace(`/chat/${history.id}`)
+    }
   }
 
   const renderHistoryList = () => (
@@ -112,7 +120,7 @@ export function Sidebar() {
             <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-[300px] sm:w-[400px]">
+        <SheetContent side="left" className="w-[300px] sm:w-[400px] overflow-y-auto">
           <nav className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">历史记录</h2>
@@ -149,8 +157,8 @@ export function Sidebar() {
       </Sheet>
 
       {/* 桌面端侧边栏 */}
-      <div className="hidden md:flex h-full w-[300px] flex-col gap-4 border-r p-4">
-        <div className="flex items-center justify-between">
+      <div className="hidden md:flex h-full w-[300px] flex-col gap-4 border-r p-4 overflow-y-auto">
+        <div className="flex items-center justify-between sticky top-0 bg-background z-10 pb-2">
           <h2 className="text-lg font-semibold">历史记录</h2>
           <div className="flex gap-2">
             <Button variant="ghost" size="icon" onClick={handleNewChat}>

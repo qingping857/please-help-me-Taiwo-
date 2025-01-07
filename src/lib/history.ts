@@ -2,19 +2,38 @@ export interface HistoryItem {
   id: string
   title: string
   date: string
-  messages: {
-    id: string
-    role: 'user' | 'assistant'
-    content: string
-    audioUrl?: string
-  }[]
+  messages: any[]
+  content?: {
+    text: string
+    fileQueue: any[]
+    currentPageIndex: number
+  }
 }
 
 // 从localStorage获取历史记录
 export function getHistories(): HistoryItem[] {
   if (typeof window === 'undefined') return []
   const histories = localStorage.getItem('chat-histories')
-  return histories ? JSON.parse(histories) : []
+  const parsedHistories = histories ? JSON.parse(histories) : []
+  
+  // 检查是否需要清理
+  if (parsedHistories.length > 0) {
+    const uniqueIds = new Set<string>()
+    let hasDuplicates = false
+    
+    parsedHistories.forEach((h: HistoryItem) => {
+      if (uniqueIds.has(h.id)) {
+        hasDuplicates = true
+      }
+      uniqueIds.add(h.id)
+    })
+    
+    if (hasDuplicates) {
+      return cleanupHistories()
+    }
+  }
+  
+  return parsedHistories
 }
 
 // 保存历史记录到localStorage
@@ -50,4 +69,19 @@ export function updateHistory(id: string, history: Partial<HistoryItem>) {
     histories[index] = { ...histories[index], ...history }
     saveHistories(histories)
   }
+}
+
+// 清理无效的历史记录
+export function cleanupHistories() {
+  const histories = getHistories()
+  const uniqueIds = new Set<string>()
+  const cleanedHistories = histories.filter(h => {
+    if (uniqueIds.has(h.id)) {
+      return false // 删除重复的ID
+    }
+    uniqueIds.add(h.id)
+    return true
+  })
+  saveHistories(cleanedHistories)
+  return cleanedHistories
 } 
