@@ -1,15 +1,13 @@
 import { type SpeechModel } from 'assemblyai'
 
 // AssemblyAI API 配置
-export const ASSEMBLYAI_API_KEY = '19c61fc2f79648f5ae6b3ccfb42f8ba4'
+export const ASSEMBLYAI_API_KEY = process.env.NEXT_PUBLIC_ASSEMBLYAI_API_KEY || ''
 
 // Speech Recognition API 配置
 export const speechRecognitionConfig = {
-  speech_model: 'best' as const, // 使用最佳模型
+  speech_model: 'nano' as const, // 使用 nano 模型以支持更多语言
   punctuate: true, // 添加标点符号
   format_text: true, // 格式化文本（包括专有名词和数字）
-  language_detection: true, // 启用自动语言检测
-  language_code: null, // 不指定固定语言，使用自动检测
-  disfluencies: false, // 移除语气词（um, uh, hmm等）
-  filter_profanity: true // 过滤脏话
+  language_code: 'ar', // 指定阿拉伯语
+  disfluencies: false // 移除语气词（um, uh, hmm等）
 };

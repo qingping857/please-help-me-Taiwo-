@@ -6,7 +6,6 @@ export interface HistoryItem {
   content?: {
     text: string
     fileQueue: any[]
-    currentPageIndex: number
   }
 }
 
@@ -43,17 +42,58 @@ export function saveHistories(histories: HistoryItem[]) {
 }
 
 // 添加新的历史记录
-export function addHistory(history: HistoryItem) {
+export function addHistory(history: Partial<HistoryItem>) {
+  const now = new Date()
+  const defaultTitle = `转录记录 ${now.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })}`
+
+  const newHistory: HistoryItem = {
+    id: Math.random().toString(36).substring(2),
+    title: history.title || defaultTitle,
+    date: now.toISOString(),
+    messages: history.messages || [],
+    content: history.content
+  }
+
   const histories = getHistories()
-  histories.unshift(history) // 新记录添加到开头
+  histories.unshift(newHistory)
   saveHistories(histories)
+  return newHistory
+}
+
+// 重命名历史记录
+export function renameHistory(id: string, newTitle: string) {
+  const histories = getHistories()
+  const updatedHistories = histories.map(h => 
+    h.id === id ? { ...h, title: newTitle } : h
+  )
+  saveHistories(updatedHistories)
+}
+
+// 获取单个历史记录
+export function getHistory(id: string): HistoryItem | undefined {
+  const histories = getHistories()
+  return histories.find(h => h.id === id)
+}
+
+// 更新历史记录
+export function updateHistory(id: string, updates: Partial<HistoryItem>) {
+  const histories = getHistories()
+  const updatedHistories = histories.map(h => 
+    h.id === id ? { ...h, ...updates } : h
+  )
+  saveHistories(updatedHistories)
 }
 
 // 删除历史记录
 export function deleteHistory(id: string) {
   const histories = getHistories()
-  const newHistories = histories.filter(h => h.id !== id)
-  saveHistories(newHistories)
+  const updatedHistories = histories.filter(h => h.id !== id)
+  saveHistories(updatedHistories)
 }
 
 // 清空所有历史记录
@@ -61,25 +101,15 @@ export function clearHistories() {
   saveHistories([])
 }
 
-// 更新历史记录
-export function updateHistory(id: string, history: Partial<HistoryItem>) {
+// 清理重复的历史记录
+function cleanupHistories(): HistoryItem[] {
   const histories = getHistories()
-  const index = histories.findIndex(h => h.id === id)
-  if (index !== -1) {
-    histories[index] = { ...histories[index], ...history }
-    saveHistories(histories)
-  }
-}
-
-// 清理无效的历史记录
-export function cleanupHistories() {
-  const histories = getHistories()
-  const uniqueIds = new Set<string>()
+  const seen = new Set<string>()
   const cleanedHistories = histories.filter(h => {
-    if (uniqueIds.has(h.id)) {
-      return false // 删除重复的ID
+    if (seen.has(h.id)) {
+      return false
     }
-    uniqueIds.add(h.id)
+    seen.add(h.id)
     return true
   })
   saveHistories(cleanedHistories)

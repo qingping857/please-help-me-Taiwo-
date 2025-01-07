@@ -2,17 +2,18 @@
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Mic, StopCircle, Upload, File, X, Loader2, FileDown, ChevronLeft, ChevronRight } from "lucide-react"
-import { useState, useRef, useEffect, useMemo } from "react"
+import { Mic, StopCircle, Upload, File, X, Loader2, FileDown, Pencil } from "lucide-react"
+import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { SpeechRecognition } from "@/lib/speech-recognition"
 import { useToast } from "@/hooks/use-toast"
 import { motion } from "framer-motion"
 import { Document, Packer, Paragraph, TextRun } from 'docx'
 import { saveAs } from 'file-saver'
-import { SentenceBlock } from '@/components/sentence-block'
 import { useRouter, usePathname } from "next/navigation"
-import { getHistories, saveHistories } from "@/lib/history"
+import { getHistories, saveHistories, renameHistory, getHistory, updateHistory } from "@/lib/history"
 import type { HistoryItem } from "@/lib/history"
+import { Input } from "@/components/ui/input"
+import { SentenceBlock } from "@/components/sentence-block"
 
 interface QueuedFile {
   id: string
@@ -26,7 +27,6 @@ export function MainContent() {
   const router = useRouter()
   const pathname = usePathname()
   
-  // 获取当前聊天ID并确保其有效
   const chatId = useMemo(() => {
     const id = pathname?.split('/').pop()
     return id && id !== 'new' ? id : null
@@ -38,96 +38,61 @@ export function MainContent() {
   const [dragActive, setDragActive] = useState(false)
   const [fileQueue, setFileQueue] = useState<QueuedFile[]>([])
   const [queueProcessingState, setQueueProcessingState] = useState<'idle' | 'processing'>('idle')
-  const [currentPageIndex, setCurrentPageIndex] = useState(0)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [currentHistory, setCurrentHistory] = useState<HistoryItem | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
-  
-  // 获取当前页面的文本和状态
-  const getCurrentPageContent = () => {
-    if (fileQueue.length === 0) {
-      // 如果没有文件队列，显示录音转写的文本
-      return {
-        text: transcribedText,
-        isProcessing: isTranscribing
-      }
-    }
 
-    // 获取当前页面对应的文件
-    const currentFile = fileQueue[currentPageIndex]
-    if (!currentFile) {
-      return {
-        text: '',
-        isProcessing: false
-      }
-    }
+  // 重置所有状态
+  const resetState = useCallback(() => {
+    setIsRecording(false)
+    setTranscribedText("")
+    setIsTranscribing(false)
+    setDragActive(false)
+    setFileQueue([])
+    setQueueProcessingState('idle')
+    setCurrentHistory(null)
+    setNewTitle('')
+  }, [])
 
-    return {
-      text: currentFile.text || '',
-      isProcessing: currentFile.status === 'processing'
-    }
-  }
-
-  // 处理翻页
-  const handlePageChange = (direction: 'prev' | 'next') => {
-    if (direction === 'prev' && currentPageIndex > 0) {
-      setCurrentPageIndex(currentPageIndex - 1)
-    } else if (direction === 'next' && currentPageIndex < fileQueue.length - 1) {
-      setCurrentPageIndex(currentPageIndex + 1)
-    }
-  }
-
-  // 从本地存储加载内容
+  // 加载当前历史记录
   useEffect(() => {
-    if (!chatId) return
-
-    const histories = getHistories()
-    const currentHistory = histories.find((h: HistoryItem) => h.id === chatId)
-    
-    // 如果找不到对应的历史记录，跳转到新建页面
-    if (!currentHistory) {
-      console.warn('找不到历史记录:', chatId)
-      // 删除无效的历史记录
-      const cleanedHistories = histories.filter(h => h.id !== chatId)
-      saveHistories(cleanedHistories)
-      // 跳转到新建页面
-      router.replace('/chat/new')
-      return
-    }
-
-    // 加载历史记录内容
-    if (currentHistory.content) {
-      setTranscribedText(currentHistory.content.text || '')
-      setFileQueue(currentHistory.content.fileQueue || [])
-      setCurrentPageIndex(currentHistory.content.currentPageIndex || 0)
-    } else {
-      resetState()
+    if (chatId) {
+      const history = getHistory(chatId)
+      if (history) {
+        setCurrentHistory(history)
+        setNewTitle(history.title)
+        
+        if (history.content) {
+          // 确保文件队列的深拷贝，避免状态共享
+          const newFileQueue = JSON.parse(JSON.stringify(history.content.fileQueue || []))
+          setFileQueue(newFileQueue)
+          setTranscribedText(history.content.text || '')
+        }
+      } else {
+        console.warn('找不到历史记录:', chatId)
+        router.replace('/chat/new')
+      }
     }
   }, [chatId, router])
 
   // 保存内容到本地存储
-  const saveToLocalStorage = (text: string, files: QueuedFile[], pageIndex: number) => {
-    if (!chatId) return
+  const saveToLocalStorage = useCallback(() => {
+    if (!chatId || !currentHistory) return
     
-    const histories = getHistories()
-    const updatedHistories = histories.map((h: HistoryItem) => {
-      if (h.id === chatId) {
-        return {
-          ...h,
-          content: {
-            text,
-            fileQueue: files,
-            currentPageIndex: pageIndex
-          }
-        }
-      }
-      return h
+    const content = {
+      text: transcribedText,
+      fileQueue
+    }
+    
+    updateHistory(chatId, {
+      content
     })
-    
-    localStorage.setItem('chat-histories', JSON.stringify(updatedHistories))
-  }
+  }, [chatId, currentHistory, transcribedText, fileQueue])
 
   // 处理转写结果
-  const handleTranscript = (text: string, fileId?: string) => {
+  const handleTranscript = useCallback((text: string, fileId?: string) => {
     console.log('收到转写结果:', { text, fileId })
     
     if (fileId) {
@@ -140,85 +105,133 @@ export function MainContent() {
             status: 'completed' as const 
           } : f
         )
-
-        // 如果是第一个完成的文件，自动切换到该文件的页面
-        const completedFile = newQueue.find(f => f.id === fileId)
-        if (completedFile) {
-          const fileIndex = newQueue.indexOf(completedFile)
-          setCurrentPageIndex(fileIndex)
-          // 保存到本地存储
-          saveToLocalStorage(text, newQueue, fileIndex)
-        }
-
         return newQueue
       })
-
       setQueueProcessingState('idle')
     } else {
       // 处理录音的转写结果
       if (text) {
-        setTranscribedText(text)
-        setCurrentPageIndex(0)
-        // 保存到本地存储
-        saveToLocalStorage(text, fileQueue, 0)
+        const recordingFile: QueuedFile = {
+          id: `recording_${Date.now()}`,
+          file: new window.File([], "录音文件.webm", { type: 'audio/webm' }),
+          status: 'completed',
+          text
+        }
+        setFileQueue(prev => [...prev, recordingFile])
       }
       setIsTranscribing(false)
     }
-  }
+
+    // 保存到本地存储
+    setTimeout(() => saveToLocalStorage(), 0)
+  }, [saveToLocalStorage])
 
   // 将文本分割成句子
-  const splitIntoSentences = (text: string): Array<{
+  const splitIntoSentences = (text: string, prefix: string = ''): Array<{
     id: string;
     content: string;
     timestamp: string;
   }> => {
-    // 使用正则表达式匹配句子，包括标点符号
-    const matches = text.match(/[^。！？.!?]+[。！？.!?]?/g) || []
+    // 按标点符号分割句子（支持阿拉伯语和英语的标点符号）
+    const matches = text.match(/[^。！？.!?؟]+[。！？.!?؟]?/g) || []
     
-    return matches
-      .map((content, index) => ({
-        id: `${index}`,
-        content: content.trim(),
-        timestamp: `${index + 1}. 00:00 - 00:00`
-      }))
-      .filter(item => item.content.length > 0)
+    // 假设每个字的平均发音时长为0.3秒
+    const CHAR_DURATION = 0.3
+    let currentTime = 0
+    
+    // 可选的切割长度
+    const CHUNK_LENGTHS = [20, 25, 30, 40]
+    
+    // 进一步处理句子
+    const sentences = matches.flatMap((sentence, index) => {
+      const trimmedSentence = sentence.trim()
+      
+      // 如果句子长度超过最大允许长度，需要进一步分割
+      if (trimmedSentence.length > Math.max(...CHUNK_LENGTHS)) {
+        const chunks: string[] = []
+        let currentChunk = ''
+        
+        // 按字符分割句子
+        for (let char of trimmedSentence) {
+          // 随机选择一个切割长度
+          const randomLength = CHUNK_LENGTHS[Math.floor(Math.random() * CHUNK_LENGTHS.length)]
+          
+          if (currentChunk.length >= randomLength) {
+            // 当前块已满，添加到结果中
+            chunks.push(currentChunk + (char.match(/[。！？.!?؟]/) ? '' : '。'))
+            currentChunk = char
+          } else {
+            currentChunk += char
+          }
+        }
+        
+        // 处理最后一个块
+        if (currentChunk) {
+          chunks.push(currentChunk + (currentChunk.match(/[。！？.!?؟]$/) ? '' : '。'))
+        }
+        
+        // 为每个块创建句子对象
+        return chunks.map((chunk, chunkIndex) => {
+          const startTime = currentTime
+          const duration = chunk.length * CHAR_DURATION
+          currentTime = startTime + duration
+          
+          const startTimeStr = formatTime(startTime)
+          const endTimeStr = formatTime(currentTime)
+          
+          return {
+            id: `${prefix}_${Math.random().toString(36).substring(2)}_${index}_${chunkIndex}`,
+            content: chunk,
+            timestamp: `${index + 1}.${chunkIndex + 1}. ${startTimeStr} - ${endTimeStr}`
+          }
+        })
+      }
+      
+      // 如果句子长度不超过最大允许长度，直接返回
+      const startTime = currentTime
+      const duration = trimmedSentence.length * CHAR_DURATION
+      currentTime = startTime + duration
+      
+      const startTimeStr = formatTime(startTime)
+      const endTimeStr = formatTime(currentTime)
+      
+      return [{
+        id: `${prefix}_${Math.random().toString(36).substring(2)}_${index}`,
+        content: trimmedSentence,
+        timestamp: `${index + 1}. ${startTimeStr} - ${endTimeStr}`
+      }]
+    })
+    
+    return sentences.filter(item => item.content.length > 0)
+  }
+
+  // 格式化时间为 mm:ss 格式
+  const formatTime = (timeInSeconds: number): string => {
+    const minutes = Math.floor(timeInSeconds / 60)
+    const seconds = Math.floor(timeInSeconds % 60)
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
   }
 
   // 处理句子编辑
-  const handleEditSentence = (index: number, newContent: string) => {
-    const currentContent = getCurrentPageContent()
-    if (!currentContent.text) return
-
-    const sentences = splitIntoSentences(currentContent.text)
-    if (!sentences[index]) return
+  const handleEditSentence = useCallback((id: string, newContent: string) => {
+    const sentences = splitIntoSentences(transcribedText, 'edit')
+    const sentenceIndex = sentences.findIndex(s => s.id === id)
+    if (sentenceIndex === -1) return
 
     let processedContent = newContent
     if (!processedContent.match(/[。！？.!?]$/)) {
       processedContent += '。'
     }
 
-    sentences[index] = {
-      ...sentences[index],
+    sentences[sentenceIndex] = {
+      ...sentences[sentenceIndex],
       content: processedContent
     }
 
     const newText = sentences.map(s => s.content).join('')
-    
-    if (fileQueue.length > 0) {
-      setFileQueue(prev => {
-        const newQueue = prev.map((f, idx) => 
-          idx === currentPageIndex ? { ...f, text: newText } : f
-        )
-        // 保存到本地存储
-        saveToLocalStorage(newText, newQueue, currentPageIndex)
-        return newQueue
-      })
-    } else {
-      setTranscribedText(newText)
-      // 保存到本地存储
-      saveToLocalStorage(newText, fileQueue, currentPageIndex)
-    }
-  }
+    setTranscribedText(newText)
+    saveToLocalStorage()
+  }, [transcribedText, saveToLocalStorage])
 
   const speechRecognition = SpeechRecognition.getInstance(handleTranscript)
 
@@ -264,17 +277,29 @@ export function MainContent() {
   const handleStopRecording = async () => {
     try {
       setIsRecording(false)
-      setIsTranscribing(true)
       const audioBlob = await speechRecognition.stopRecording()
-      await speechRecognition.handleRecordedAudio(audioBlob)
-      setIsTranscribing(false)
+      
+      // 创建录音文件并添加到队列
+      const recordingFile = new window.File([audioBlob], "录音文件.webm", { 
+        type: 'audio/webm'
+      })
+      
+      const newFile: QueuedFile = {
+        id: Math.random().toString(36).substr(2, 9),
+        file: recordingFile,
+        status: 'waiting',
+        text: undefined
+      }
+      
+      setFileQueue(prev => [...prev, newFile])
+      await speechRecognition.uploadAudio(recordingFile, newFile.id)
+      
     } catch (error) {
       toast({
         title: "处理录音失败",
         description: error instanceof Error ? error.message : "未知错误",
         variant: "destructive"
       })
-      setIsTranscribing(false)
     }
   }
 
@@ -325,8 +350,15 @@ export function MainContent() {
 
   // 导出为Word文档
   const handleExportToWord = async () => {
-    const currentContent = getCurrentPageContent()
-    if (!currentContent.text) {
+    // 合并所有文本
+    const allTexts = [
+      transcribedText,
+      ...fileQueue
+        .filter(f => f.text && f.status === 'completed')
+        .map(f => f.text)
+    ].filter(Boolean)
+
+    if (allTexts.length === 0) {
       toast({
         title: "无法导出",
         description: "没有可导出的转录文本",
@@ -363,7 +395,7 @@ export function MainContent() {
             new Paragraph({
               children: [
                 new TextRun({
-                  text: currentContent.text,
+                  text: allTexts.join('\n\n'),
                   size: 24,
                 }),
               ],
@@ -405,7 +437,6 @@ export function MainContent() {
     const currentFile = fileQueue.find(f => f.status === 'waiting')
     if (!currentFile) {
       console.log('没有待处理的文件，重置状态...')
-      setIsTranscribing(false)
       setQueueProcessingState('idle')
       return
     }
@@ -416,7 +447,6 @@ export function MainContent() {
       setFileQueue(prev => prev.map(f => 
         f.id === currentFile.id ? { ...f, status: 'processing' as const } : f
       ))
-      setIsTranscribing(true)
 
       // 使用全局实例处理文件
       await speechRecognition.uploadAudio(currentFile.file, currentFile.id)
@@ -443,24 +473,13 @@ export function MainContent() {
     }
   }
 
-  // 重置所有状态
-  const resetState = () => {
-    setIsRecording(false)
-    setTranscribedText("")
-    setIsTranscribing(false)
-    setDragActive(false)
-    setFileQueue([])
-    setQueueProcessingState('idle')
-    setCurrentPageIndex(0)
-  }
-
   // 监听路由变化
   useEffect(() => {
     // 当进入新建页面时重置状态
     if (pathname === '/chat/new') {
       resetState()
     }
-  }, [pathname])
+  }, [pathname, resetState])
 
   return (
     <div className="flex-1 p-6">
@@ -566,53 +585,63 @@ export function MainContent() {
 
         {/* 转写文本输出区域 */}
         <Card className="flex-1 p-6 rounded-xl h-[300px] relative">
-          <div className="flex justify-between items-center mb-4">
-            <div className="text-sm text-muted-foreground">
-              {fileQueue.length > 0 && `第 ${currentPageIndex + 1} 页，共 ${fileQueue.length} 页`}
+          {/* 状态提示 */}
+          {fileQueue.length > 0 && (
+            <div className="absolute top-4 right-4 text-sm text-muted-foreground animate-fade-in">
+              {(() => {
+                const completedCount = fileQueue.filter(f => f.status === 'completed').length
+                const processingFile = fileQueue.find(f => f.status === 'processing')
+                if (processingFile) {
+                  const currentIndex = fileQueue.indexOf(processingFile) + 1
+                  return `第${currentIndex}个文件正在转录中...`
+                }
+                if (completedCount === fileQueue.length) {
+                  return `全部${fileQueue.length}个文件已转录完成`
+                }
+                return `已完成${completedCount}/${fileQueue.length}个文件`
+              })()}
             </div>
-            <div className="flex gap-2">
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => handlePageChange('prev')}
-                disabled={currentPageIndex === 0}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => handlePageChange('next')}
-                disabled={currentPageIndex >= fileQueue.length - 1}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+          )}
 
-          <div className="h-[calc(100%-3rem)] overflow-y-auto pr-2 custom-scrollbar">
+          <div className="h-full overflow-y-auto pr-2 custom-scrollbar">
             {(() => {
-              const currentContent = getCurrentPageContent()
-              
-              if (currentContent.isProcessing) {
+              // 只在第一个文件处理且没有任何完成的文件时，显示加载状态
+              const showLoadingState = fileQueue.length > 0 && 
+                fileQueue[0].status === 'processing' &&
+                !fileQueue.some(f => f.status === 'completed')
+
+              if (showLoadingState) {
                 return (
                   <div className="flex flex-col items-center justify-center h-full gap-2">
                     <Loader2 className="h-8 w-8 animate-spin" />
-                    <span className="text-lg">正在转录...</span>
+                    <span className="text-lg">正在转录第一个文件...</span>
                   </div>
                 )
               }
 
-              if (currentContent.text) {
-                const sentences = splitIntoSentences(currentContent.text)
+              // 收集所有已完成的文本
+              const completedTexts: Array<{
+                id: string;
+                content: string;
+                timestamp: string;
+              }> = []
+              
+              // 按照队列顺序添加已完成文件的文本
+              fileQueue.forEach((f, index) => {
+                if (f.text && f.status === 'completed') {
+                  completedTexts.push(...splitIntoSentences(f.text, `file_${index}`))
+                }
+              })
+
+              if (completedTexts.length > 0) {
                 return (
                   <div className="space-y-2">
-                    {sentences.map(({ id, content, timestamp }) => (
+                    {completedTexts.map(({ id, content, timestamp }) => (
                       <SentenceBlock
                         key={id}
                         content={content}
                         timestamp={timestamp}
-                        onEdit={(newContent) => handleEditSentence(parseInt(id), newContent)}
+                        onEdit={(newContent) => handleEditSentence(id, newContent)}
                       />
                     ))}
                   </div>
@@ -628,7 +657,7 @@ export function MainContent() {
           </div>
 
           {/* 导出按钮 */}
-          {getCurrentPageContent().text && !getCurrentPageContent().isProcessing && (
+          {fileQueue.some(f => f.text && f.status === 'completed') && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

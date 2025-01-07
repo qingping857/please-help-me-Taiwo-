@@ -24,42 +24,33 @@ interface Config {
   };
 }
 
-let config: Config | null = null;
-
-export async function initConfig(): Promise<void> {
-  try {
-    config = {
-      assemblyai: {
-        apiKey: process.env.NEXT_PUBLIC_ASSEMBLYAI_API_KEY || '',
-        baseUrl: 'https://api.assemblyai.com/v2',
-        maxFileSize: 1024 * 1024 * 1000, // 1GB
-        supportedFormats: {
-          audio: SUPPORTED_AUDIO_FORMATS,
-          video: SUPPORTED_VIDEO_FORMATS
-        }
-      }
-    };
-  } catch (error) {
-    console.error('Failed to initialize config:', error);
-    throw new Error('Failed to initialize config');
+// 直接初始化配置
+const config: Config = {
+  assemblyai: {
+    apiKey: process.env.NEXT_PUBLIC_ASSEMBLYAI_API_KEY || '',
+    baseUrl: 'https://api.assemblyai.com/v2',
+    maxFileSize: 1024 * 1024 * 1000, // 1GB
+    supportedFormats: {
+      audio: SUPPORTED_AUDIO_FORMATS,
+      video: SUPPORTED_VIDEO_FORMATS
+    }
   }
-}
+};
 
 export function getConfig(): Config {
-  if (!config) {
-    throw new Error('Config not initialized. Please call initConfig() first');
-  }
   return config;
 }
 
 // 检查文件格式是否支持
-export function isFormatSupported(filename: string): boolean {
+export function isFormatSupported(filename: string | undefined): boolean {
+  if (!filename) return false;
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   return [...SUPPORTED_AUDIO_FORMATS, ...SUPPORTED_VIDEO_FORMATS].includes(extension as any);
 }
 
 // 获取文件格式类型（音频或视频）
-export function getFileType(filename: string): 'audio' | 'video' | null {
+export function getFileType(filename: string | undefined): 'audio' | 'video' | null {
+  if (!filename) return null;
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   if (SUPPORTED_AUDIO_FORMATS.includes(extension as any)) {
     return 'audio';
